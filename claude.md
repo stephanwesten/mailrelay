@@ -43,7 +43,7 @@ Follow the Red-Green-Refactor cycle:
 #### Unit Tests
 
 - Test individual functions and modules in isolation
-- Mock external dependencies (MailChannels API, environment variables)
+- Mock external dependencies (Gmail API, environment variables)
 - Fast execution (milliseconds)
 
 #### Integration Tests
