@@ -6,9 +6,8 @@
 export interface Env {
   PERSONAL_EMAIL: string;
   WORK_EMAIL: string;
-  GMAIL_CLIENT_ID: string;
-  GMAIL_CLIENT_SECRET: string;
-  GMAIL_REFRESH_TOKEN: string;
+  GMAIL_SERVICE_ACCOUNT_EMAIL: string;
+  GMAIL_PRIVATE_KEY: string;
   PINCODE: string;
   FROM_EMAIL: string;
   FROM_NAME: string;
@@ -113,9 +112,8 @@ async function handleApiSend(request: Request, env: Env): Promise<Response> {
       message: body.message || '',
       fromEmail: env.FROM_EMAIL,
       fromName: env.FROM_NAME,
-      gmailClientId: env.GMAIL_CLIENT_ID,
-      gmailClientSecret: env.GMAIL_CLIENT_SECRET,
-      gmailRefreshToken: env.GMAIL_REFRESH_TOKEN,
+      serviceAccountEmail: env.GMAIL_SERVICE_ACCOUNT_EMAIL,
+      privateKey: env.GMAIL_PRIVATE_KEY,
     });
 
     if (!result.success) {
@@ -266,9 +264,8 @@ async function handleFormSubmit(request: Request, env: Env): Promise<Response> {
       message,
       fromEmail: env.FROM_EMAIL,
       fromName: env.FROM_NAME,
-      gmailClientId: env.GMAIL_CLIENT_ID,
-      gmailClientSecret: env.GMAIL_CLIENT_SECRET,
-      gmailRefreshToken: env.GMAIL_REFRESH_TOKEN,
+      serviceAccountEmail: env.GMAIL_SERVICE_ACCOUNT_EMAIL,
+      privateKey: env.GMAIL_PRIVATE_KEY,
     });
 
     if (!result.success) {
@@ -285,36 +282,95 @@ async function handleFormSubmit(request: Request, env: Env): Promise<Response> {
   }
 }
 
-async function getGmailAccessToken(
-  clientId: string,
-  clientSecret: string,
-  refreshToken: string
+// JWT Helper Functions
+function base64urlEncode(data: Uint8Array): string {
+  const base64 = btoa(String.fromCharCode(...data));
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+async function createJWT(serviceAccountEmail: string, privateKey: string): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const expiry = now + 3600; // 1 hour
+
+  const header = {
+    alg: 'RS256',
+    typ: 'JWT'
+  };
+
+  const payload = {
+    iss: serviceAccountEmail,
+    scope: 'https://www.googleapis.com/auth/gmail.send',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: expiry,
+    iat: now
+  };
+
+  const encoder = new TextEncoder();
+  const headerB64 = base64urlEncode(encoder.encode(JSON.stringify(header)));
+  const payloadB64 = base64urlEncode(encoder.encode(JSON.stringify(payload)));
+  const unsignedToken = `${headerB64}.${payloadB64}`;
+
+  // Import the private key
+  const pemHeader = '-----BEGIN PRIVATE KEY-----';
+  const pemFooter = '-----END PRIVATE KEY-----';
+  const pemContents = privateKey.substring(
+    pemHeader.length,
+    privateKey.length - pemFooter.length
+  ).replace(/\s/g, '');
+
+  const binaryDer = Uint8Array.from(atob(pemContents), c => c.charCodeAt(0));
+
+  const cryptoKey = await crypto.subtle.importKey(
+    'pkcs8',
+    binaryDer,
+    {
+      name: 'RSASSA-PKCS1-v1_5',
+      hash: 'SHA-256',
+    },
+    false,
+    ['sign']
+  );
+
+  // Sign the token
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    cryptoKey,
+    encoder.encode(unsignedToken)
+  );
+
+  const signatureB64 = base64urlEncode(new Uint8Array(signature));
+  return `${unsignedToken}.${signatureB64}`;
+}
+
+async function getServiceAccountAccessToken(
+  serviceAccountEmail: string,
+  privateKey: string
 ): Promise<{ success: boolean; accessToken?: string; error?: string }> {
   try {
-    console.log('Requesting Gmail access token');
+    console.log('Creating JWT for service account');
+    const jwt = await createJWT(serviceAccountEmail, privateKey);
 
+    console.log('Requesting access token');
     const response = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-        grant_type: 'refresh_token',
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion: jwt,
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Gmail OAuth error', {
+      console.error('Service account OAuth error', {
         status: response.status,
         error: errorText
       });
       return {
         success: false,
-        error: `OAuth token refresh failed: ${response.status} ${errorText}`
+        error: `OAuth token request failed: ${response.status} ${errorText}`
       };
     }
 
@@ -325,7 +381,7 @@ async function getGmailAccessToken(
       accessToken: data.access_token
     };
   } catch (error) {
-    console.error('OAuth token exception', error);
+    console.error('Service account token exception', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -339,9 +395,8 @@ async function sendEmail(params: {
   message: string;
   fromEmail: string;
   fromName: string;
-  gmailClientId: string;
-  gmailClientSecret: string;
-  gmailRefreshToken: string;
+  serviceAccountEmail: string;
+  privateKey: string;
 }): Promise<{ success: boolean; error?: string }> {
   try {
     console.log('Sending email via Gmail API', {
@@ -350,11 +405,10 @@ async function sendEmail(params: {
       from: params.fromEmail
     });
 
-    // Get access token
-    const tokenResult = await getGmailAccessToken(
-      params.gmailClientId,
-      params.gmailClientSecret,
-      params.gmailRefreshToken
+    // Get access token using service account
+    const tokenResult = await getServiceAccountAccessToken(
+      params.serviceAccountEmail,
+      params.privateKey
     );
 
     if (!tokenResult.success || !tokenResult.accessToken) {

@@ -54,12 +54,18 @@ MailRelay is an email relay service built on Cloudflare Workers using Gmail API.
 ```
 PERSONAL_EMAIL=your-personal@example.com
 WORK_EMAIL=your-work@example.com
-GMAIL_CLIENT_ID=your-gmail-client-id
-GMAIL_CLIENT_SECRET=your-gmail-client-secret
-GMAIL_REFRESH_TOKEN=your-gmail-refresh-token
+GMAIL_SERVICE_ACCOUNT_EMAIL=your-service-account@project.iam.gserviceaccount.com
+GMAIL_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n
 PINCODE=your-secret-pincode
 FROM_EMAIL=your-gmail-account@gmail.com
 FROM_NAME=MailRelay
+```
+
+Set these via `wrangler secret put` for sensitive values:
+```bash
+echo "cfsendmail@sendmailsw.iam.gserviceaccount.com" | wrangler secret put GMAIL_SERVICE_ACCOUNT_EMAIL
+cat service-account-key.json | jq -r '.private_key' | wrangler secret put GMAIL_PRIVATE_KEY
+echo "1404" | wrangler secret put PINCODE
 ```
 
 -----

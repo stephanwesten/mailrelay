@@ -5,9 +5,8 @@ compatibility_date = "2024-10-31"
 # Environment variables (secrets should be set via `wrangler secret put`)
 # PERSONAL_EMAIL - set via wrangler secret
 # WORK_EMAIL - set via wrangler secret
-# GMAIL_CLIENT_ID - set via wrangler secret
-# GMAIL_CLIENT_SECRET - set via wrangler secret
-# GMAIL_REFRESH_TOKEN - set via wrangler secret
+# GMAIL_SERVICE_ACCOUNT_EMAIL - set via wrangler secret (e.g., cfsendmail@sendmailsw.iam.gserviceaccount.com)
+# GMAIL_PRIVATE_KEY - set via wrangler secret (the full private key with -----BEGIN/END PRIVATE KEY-----)
 # PINCODE - set via wrangler secret
 # FROM_EMAIL - set via wrangler secret
 # FROM_NAME - set via wrangler secret
