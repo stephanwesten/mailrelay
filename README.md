@@ -1,12 +1,12 @@
 # MailRelay
-Email relay with web form and API. Toggle between personal/work addresses, built with Cloudflare Workers + MailChannels
+Email relay with web form and API. Toggle between personal/work addresses, built with Cloudflare Workers + Gmail API
 
 
 # Project Specifications
 
 ## Overview
 
-MailRelay is an email relay service built on Cloudflare Workers using MailChannels. It provides both a web interface and REST API for sending emails to pre-configured personal and work addresses.
+MailRelay is an email relay service built on Cloudflare Workers using Gmail API. It provides both a web interface and REST API for sending emails to pre-configured personal and work addresses.
 
 -----
 
@@ -35,7 +35,7 @@ MailRelay is an email relay service built on Cloudflare Workers using MailChanne
 ### Backend
 
 - **Runtime**: Cloudflare Workers
-- **Email Provider**: MailChannels API
+- **Email Provider**: Gmail API
 - **Language**: JavaScript/TypeScript
 - **Deployment**: Wrangler CLI
 
@@ -54,9 +54,11 @@ MailRelay is an email relay service built on Cloudflare Workers using MailChanne
 ```
 PERSONAL_EMAIL=your-personal@example.com
 WORK_EMAIL=your-work@example.com
-MAILCHANNELS_API_KEY=xxx
+GMAIL_CLIENT_ID=your-gmail-client-id
+GMAIL_CLIENT_SECRET=your-gmail-client-secret
+GMAIL_REFRESH_TOKEN=your-gmail-refresh-token
 PINCODE=your-secret-pincode
-FROM_EMAIL=noreply@yourdomain.com
+FROM_EMAIL=your-gmail-account@gmail.com
 FROM_NAME=MailRelay
 ```
 

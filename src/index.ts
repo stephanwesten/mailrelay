@@ -1,12 +1,14 @@
 /**
  * MailRelay - Simple Email Relay Service
- * Cloudflare Worker with MailChannels integration
+ * Cloudflare Worker with Gmail API integration
  */
 
 export interface Env {
   PERSONAL_EMAIL: string;
   WORK_EMAIL: string;
-  MAILCHANNELS_API_KEY: string;
+  GMAIL_CLIENT_ID: string;
+  GMAIL_CLIENT_SECRET: string;
+  GMAIL_REFRESH_TOKEN: string;
   PINCODE: string;
   FROM_EMAIL: string;
   FROM_NAME: string;
@@ -28,6 +30,17 @@ interface ApiResponse {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // Handle OPTIONS request for CORS
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        },
+      });
+    }
 
     // Handle API endpoint
     if (url.pathname === '/api/send' && request.method === 'POST') {
@@ -93,14 +106,16 @@ async function handleApiSend(request: Request, env: Env): Promise<Response> {
     // Determine recipient email
     const toEmail = body.destination === 'personal' ? env.PERSONAL_EMAIL : env.WORK_EMAIL;
 
-    // Send email via MailChannels
+    // Send email via Gmail API
     const result = await sendEmail({
       to: toEmail,
       subject: body.subject,
       message: body.message || '',
       fromEmail: env.FROM_EMAIL,
       fromName: env.FROM_NAME,
-      apiKey: env.MAILCHANNELS_API_KEY
+      gmailClientId: env.GMAIL_CLIENT_ID,
+      gmailClientSecret: env.GMAIL_CLIENT_SECRET,
+      gmailRefreshToken: env.GMAIL_REFRESH_TOKEN,
     });
 
     if (!result.success) {
@@ -244,14 +259,16 @@ async function handleFormSubmit(request: Request, env: Env): Promise<Response> {
     // Determine recipient email
     const toEmail = destination === 'personal' ? env.PERSONAL_EMAIL : env.WORK_EMAIL;
 
-    // Send email via MailChannels
+    // Send email via Gmail API
     const result = await sendEmail({
       to: toEmail,
       subject,
       message,
       fromEmail: env.FROM_EMAIL,
       fromName: env.FROM_NAME,
-      apiKey: env.MAILCHANNELS_API_KEY
+      gmailClientId: env.GMAIL_CLIENT_ID,
+      gmailClientSecret: env.GMAIL_CLIENT_SECRET,
+      gmailRefreshToken: env.GMAIL_REFRESH_TOKEN,
     });
 
     if (!result.success) {
@@ -268,60 +285,130 @@ async function handleFormSubmit(request: Request, env: Env): Promise<Response> {
   }
 }
 
+async function getGmailAccessToken(
+  clientId: string,
+  clientSecret: string,
+  refreshToken: string
+): Promise<{ success: boolean; accessToken?: string; error?: string }> {
+  try {
+    console.log('Requesting Gmail access token');
+
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Gmail OAuth error', {
+        status: response.status,
+        error: errorText
+      });
+      return {
+        success: false,
+        error: `OAuth token refresh failed: ${response.status} ${errorText}`
+      };
+    }
+
+    const data = await response.json() as { access_token: string };
+    console.log('Access token obtained successfully');
+    return {
+      success: true,
+      accessToken: data.access_token
+    };
+  } catch (error) {
+    console.error('OAuth token exception', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+}
+
 async function sendEmail(params: {
   to: string;
   subject: string;
   message: string;
   fromEmail: string;
   fromName: string;
-  apiKey: string;
+  gmailClientId: string;
+  gmailClientSecret: string;
+  gmailRefreshToken: string;
 }): Promise<{ success: boolean; error?: string }> {
   try {
-    console.log('Sending email to MailChannels', {
+    console.log('Sending email via Gmail API', {
       to: params.to,
       subject: params.subject,
       from: params.fromEmail
     });
 
-    const response = await fetch('https://api.mailchannels.net/tx/v1/send', {
+    // Get access token
+    const tokenResult = await getGmailAccessToken(
+      params.gmailClientId,
+      params.gmailClientSecret,
+      params.gmailRefreshToken
+    );
+
+    if (!tokenResult.success || !tokenResult.accessToken) {
+      return {
+        success: false,
+        error: tokenResult.error || 'Failed to get access token'
+      };
+    }
+
+    // Create email in RFC 2822 format
+    const emailLines = [
+      `From: ${params.fromName} <${params.fromEmail}>`,
+      `To: ${params.to}`,
+      `Subject: ${params.subject}`,
+      'MIME-Version: 1.0',
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      params.message
+    ];
+    const email = emailLines.join('\r\n');
+
+    // Base64url encode the email
+    const encodedEmail = btoa(email)
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    // Send via Gmail API
+    const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
       method: 'POST',
       headers: {
+        'Authorization': `Bearer ${tokenResult.accessToken}`,
         'Content-Type': 'application/json',
-        'X-API-Key': params.apiKey,
       },
       body: JSON.stringify({
-        personalizations: [
-          {
-            to: [{ email: params.to }],
-          },
-        ],
-        from: {
-          email: params.fromEmail,
-          name: params.fromName,
-        },
-        subject: params.subject,
-        content: [
-          {
-            type: 'text/plain',
-            value: params.message,
-          },
-        ],
+        raw: encodedEmail
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('MailChannels API error', {
+      console.error('Gmail API error', {
         status: response.status,
         statusText: response.statusText,
         error: errorText
       });
       return {
         success: false,
-        error: `MailChannels API returned ${response.status}: ${errorText}`
+        error: `Gmail API returned ${response.status}: ${errorText}`
       };
     }
 
+    const result = await response.json();
+    console.log('Email sent successfully', { messageId: result.id });
     return { success: true };
   } catch (error) {
     console.error('Email sending exception', error);
